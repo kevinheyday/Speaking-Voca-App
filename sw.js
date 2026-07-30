@@ -1,3 +1,3 @@
-const CACHE='opic-vocab-v3-repeat-only-no-status';
+const CACHE='opic-vocab-v4-repeat-only-strict';
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['./','./index.html','./manifest.webmanifest']))));
 self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));

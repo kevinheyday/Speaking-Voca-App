@@ -759,7 +759,7 @@ function updateAutoBadge(){
   b.textContent=`▶ 선택 Day 자동 학습 · ${AUTO.pass}/${AUTO.repeats}회 · 카드 ${i+1}/${deck.length}`;
   b.classList.add('show');
 }
-function stopAutoLearning(){AUTO.active=false;releaseWakeLock();AUTO.token++;clearReadingFocus();updateAutoBadge()}
+function stopAutoLearning(){AUTO.active=false; releaseWakeLock();AUTO.token++;clearReadingFocus();updateAutoBadge()}
 
 let __lastSpokenLang='';
 function stopSpeech(){
@@ -850,8 +850,13 @@ async function speakTwice(text,rate=.82){
 }
 
 
-function setWakeStatus(text,ok=false){ /* hidden: internal Wake Lock only */ }
-function hideWakeStatus(){ /* hidden: internal Wake Lock only */ }
+function setWakeStatus(){ }
+function hideWakeStatus(){ }
+
+
+function isRepeatAutoMode(){
+  return !!(window.AUTO && AUTO.active===true);
+}
 
 // ===== Hybrid keep-awake: Screen Wake Lock + offline video fallback =====
 let __wakeLock=null;
@@ -865,6 +870,11 @@ function keepAwakeVideo(){
 // IMPORTANT: call this synchronously from an actual user click/touch handler.
 // This starts the fallback media while user activation is still available.
 function enableKeepAwakeFromGesture(){
+  if(!isRepeatAutoMode()){
+    releaseWakeLock();
+    return;
+  }
+
   __wakeLockWanted=true;
 
   // Standard Screen Wake Lock (works when the browser/context allows it).
@@ -876,9 +886,9 @@ function enableKeepAwakeFromGesture(){
           return;
         }
         __wakeLock=lock;
-        setWakeStatus('🔒 화면 유지 ON',true);
-        lock.addEventListener('release',()=>{ __wakeLock=null; if(__wakeLockWanted)setWakeStatus('⚠️ 화면 유지 재연결 중'); });
-      }).catch(()=>{setWakeStatus(location.protocol==='https:'?'⚠️ 화면 유지 권한 실패':'⚠️ HTTPS에서 실행 필요');});
+        setWakeStatus('',true);
+        lock.addEventListener('release',()=>{ __wakeLock=null; if(__wakeLockWanted)setWakeStatus(''); });
+      }).catch(()=>{setWakeStatus(location.protocol==='https:'?'':'');});
     }catch(e){}
   }
 
@@ -903,17 +913,22 @@ function enableKeepAwakeFromGesture(){
 }
 
 async function acquireWakeLock(){
+  if(!isRepeatAutoMode()){
+    await releaseWakeLock();
+    return false;
+  }
+
   __wakeLockWanted=true;
 
   if('wakeLock' in navigator && document.visibilityState==='visible'){
     if(!__wakeLock || __wakeLock.released){
       try{
         __wakeLock=await navigator.wakeLock.request('screen');
-        setWakeStatus('🔒 화면 유지 ON',true);
-        __wakeLock.addEventListener('release',()=>{ __wakeLock=null; if(__wakeLockWanted)setWakeStatus('⚠️ 화면 유지 재연결 중'); });
+        setWakeStatus('',true);
+        __wakeLock.addEventListener('release',()=>{ __wakeLock=null; if(__wakeLockWanted)setWakeStatus(''); });
       }catch(e){
         __wakeLock=null;
-        setWakeStatus(location.protocol==='https:'?'⚠️ 화면 유지 권한 실패':'⚠️ HTTPS에서 실행 필요');
+        setWakeStatus(location.protocol==='https:'?'':'');
       }
     }
   }
@@ -947,17 +962,16 @@ async function releaseWakeLock(){
 }
 
 function shouldKeepScreenAwake(){
-  const speechMode=$('speechMode') ? $('speechMode').value : 'off';
-  const learnVisible=$('learn') && !$('learn').classList.contains('hidden');
-  return speechMode!=='off' && learnVisible && AUTO.active===true;
+  return isRepeatAutoMode() && document.visibilityState==='visible';
 }
 
 // If the system/browser releases a standard Wake Lock temporarily,
 // request it again when the page becomes visible. The fallback video is
 // also resumed if it was previously user-authorized.
-document.addEventListener('visibilitychange', async()=>{
-  if(document.visibilityState==='visible' && (__wakeLockWanted || shouldKeepScreenAwake())){
-    await acquireWakeLock();
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible'){
+    if(isRepeatAutoMode()) await acquireWakeLock();
+    else await releaseWakeLock();
   }
 });
 
@@ -972,15 +986,13 @@ setInterval(()=>{
 },5000);
 
 async function autoRead(w,renderVersion=__renderVersion){
-  // Keep the screen awake ONLY during selected/repeat autoplay.
-  // Normal learning/quiz/review must follow the phone's screen-timeout setting.
-  if(AUTO.active===true){
+  if(isRepeatAutoMode()){
     await acquireWakeLock();
   }else{
     await releaseWakeLock();
   }
 
-  if(!w)return false;
+if(!w)return false;
   const expectedKey=cardKey(w);
 
   stopSpeech();
@@ -1096,7 +1108,7 @@ async function autoReadAndAdvance(w,renderVersion=__renderVersion){
   if(i<deck.length-1){i++;render(true);return}
   if(AUTO.pass<AUTO.repeats){AUTO.pass++;i=0;render(true);return}
 
-  stopSpeech();AUTO.active=false;releaseWakeLock();clearExactReadingFocus();updateAutoBadge();$('bar').style.width='100%';
+  stopSpeech();AUTO.active=false; releaseWakeLock();clearExactReadingFocus();updateAutoBadge();$('bar').style.width='100%';
   $('finishSummary').innerHTML=`선택한 ${AUTO.selectedDays.length}개 Day · ${deck.length}개 카드를 ${AUTO.repeats}회 자동 학습했습니다.`;
   $('finishOverlay').classList.remove('hidden');
 }
@@ -1373,7 +1385,8 @@ $('speechMode').onchange=async()=>{
     m==='full'?'전체 읽기: 단어, 뜻, 예문, 해석, 패러프레이즈, 추가 표현까지 읽습니다.':
     '새 카드에서 단어, 예문, 패러프레이즈를 차례로 읽어 줍니다.';
 };
-$('startLearning').onclick=()=>{releaseWakeLock();initTTS();hasStarted=true;$('startOverlay').classList.add('hidden');$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)};$('restartLearning').onclick=()=>{stopSpeech();$('finishOverlay').classList.add('hidden');if(AUTO.selectedDays&&AUTO.selectedDays.length){document.querySelectorAll('.daySelectCheck').forEach(x=>x.checked=AUTO.selectedDays.includes(Number(x.dataset.checkDay)));startSelectedAutoLearning()}else{$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)}};
+$('startLearning').onclick=()=>{
+  releaseWakeLock();releaseWakeLock();initTTS();hasStarted=true;$('startOverlay').classList.add('hidden');$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)};$('restartLearning').onclick=()=>{stopSpeech();$('finishOverlay').classList.add('hidden');if(AUTO.selectedDays&&AUTO.selectedDays.length){document.querySelectorAll('.daySelectCheck').forEach(x=>x.checked=AUTO.selectedDays.includes(Number(x.dataset.checkDay)));startSelectedAutoLearning()}else{$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)}};
 let quizCurrent=null,quizAnswered=false;
 let quizDeck=[], quizIndex=0, quizSessionDone=false, quizSessionWrong=[];
 
@@ -1720,13 +1733,14 @@ function activateDayTab(tabName){
   else if(tabName==='quiz'){resetQuizSession()}else if(tabName==='score'){restoreLearnProgress();renderScore()}else{restoreLearnProgress()}
 }
 function startSelectedAutoLearning(){
-  enableKeepAwakeFromGesture();
+  
   const days=[...document.querySelectorAll('.daySelectCheck:checked')].map(x=>Number(x.dataset.checkDay)).sort((a,b)=>a-b);
   if(!days.length){alert('자동 학습할 Day를 먼저 체크해 주세요.');return}
   const repeats=Number(document.getElementById('autoRepeat')?.value||2);
   localStorage.setItem('selectedStudyDays',JSON.stringify(days));
   localStorage.setItem('selectedStudyRepeat',String(repeats));
-  AUTO.active=true;AUTO.selectedDays=days;AUTO.repeats=repeats;AUTO.pass=1;AUTO.token++;
+  AUTO.active=true;
+  enableKeepAwakeFromGesture();AUTO.selectedDays=days;AUTO.repeats=repeats;AUTO.pass=1;AUTO.token++;
   currentDay=days[0];W=ALL_WORDS.filter(w=>days.includes(w.newDay)).sort((a,b)=>a.newDay-b.newDay||a.newNo-b.newNo);deck=[...W];i=0;
   const dayLabel=days.length<=6?days.map(d=>'DAY '+String(d).padStart(2,'0')).join(', '):`${days.length}개 Day`;
   document.querySelector('.dayHeaderTitle h1').textContent='선택 Day 자동 학습';
@@ -1741,6 +1755,7 @@ function startSelectedAutoLearning(){
 }
 
 function openDay(day,tabName='learn'){
+  if(!isRepeatAutoMode()) releaseWakeLock();
   stopAutoLearning();
   currentDay=day;W=ALL_WORDS.filter(w=>w.newDay===currentDay);deck=[...W];i=0;
   const m=DAY_META[currentDay];document.querySelector('.dayHeaderTitle h1').textContent=`Speaking Priority VOCA · Day ${currentDay}`;document.querySelector('.dayHeaderTitle .sub').textContent=`${m.theme} · ${m.subtitle} · ${W.length} Words`;
@@ -1750,13 +1765,15 @@ function openDay(day,tabName='learn'){
   window.scrollTo(0,0);
 }
 function goHome(){
+  AUTO.active=false; releaseWakeLock();
   releaseWakeLock();
   stopAutoLearning();speechSynthesis.cancel();$('finishOverlay').classList.add('hidden');if(document.getElementById('reviewSessionOverlay'))$('reviewSessionOverlay').classList.add('hidden');if(document.getElementById('reviewModeOverlay'))$('reviewModeOverlay').classList.add('hidden');$('dayAppPage').classList.add('hidden');$('homePage').classList.remove('hidden');updateHomeDashboard();window.scrollTo(0,0);
 }
 $('homeBtn').onclick=goHome;
 const savedAutoRepeat=localStorage.getItem('selectedStudyRepeat');if(savedAutoRepeat&&document.getElementById('autoRepeat'))$('autoRepeat').value=savedAutoRepeat;
 $('selectedStartBtn').onclick=startSelectedAutoLearning;
-$('todayStartBtn').onclick=()=>{releaseWakeLock();let due=dueWordsAll();if(due.length){openDay(due[0].newDay,'forget');return}let next=Array.from({length:30},(_,i)=>i+1).find(d=>dayProgress(d).learned<dayProgress(d).total)||1;openDay(next,'learn')};
+$('todayStartBtn').onclick=()=>{
+  releaseWakeLock();releaseWakeLock();let due=dueWordsAll();if(due.length){openDay(due[0].newDay,'forget');return}let next=Array.from({length:30},(_,i)=>i+1).find(d=>dayProgress(d).learned<dayProgress(d).total)||1;openDay(next,'learn')};
 
 let sx=0;$('card').addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});$('card').addEventListener('touchend',e=>{let dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>70)cls(dx>0?'k':'l')},{passive:true});{const m=$('speechMode').value;$('autoStatus').textContent=m==='off'?'자동 읽기가 꺼져 있습니다.':m==='full'?'전체 읽기: 학습 단어만 영어와 한글 뜻을 읽고, 그 외 모든 항목은 영어만 읽습니다.':'학습 단어만 영어와 한글 뜻을 읽고, 예문과 패러프레이즈는 영어만 읽습니다.';}buildDeck('book');updateHomeDashboard();$('dayAppPage').classList.add('hidden');$('homePage').classList.remove('hidden');
 
@@ -1768,18 +1785,24 @@ if('serviceWorker' in navigator && location.protocol==='https:'){
 }
 
 
-// Wake Lock policy:
-// - selected/repeat autoplay: keep screen awake
-// - ordinary Learn / Quiz / Forget / Score: respect phone timeout
+
 document.addEventListener('click',(ev)=>{
   const tab=ev.target.closest && ev.target.closest('.tab');
   if(!tab)return;
   const view=tab.dataset ? tab.dataset.v : '';
-  if(view && view!=='learn'){
+  if(view!=='learn'){
+    if(window.AUTO) AUTO.active=false;
     releaseWakeLock();
-  }else if(view==='learn' && AUTO.active!==true){
+  }else if(!isRepeatAutoMode()){
     releaseWakeLock();
   }
 });
+
+
+setInterval(()=>{
+  if(!isRepeatAutoMode()){
+    releaseWakeLock();
+  }
+},3000);
 
 </script></body></html>
