@@ -765,7 +765,7 @@ function updateAutoBadge(){
   b.textContent=`▶ 선택 Day 자동 학습 · ${AUTO.pass}/${AUTO.repeats}회 · 카드 ${i+1}/${deck.length}`;
   b.classList.add('show');
 }
-function stopAutoLearning(){AUTO.active=false;AUTO.token++;clearReadingFocus();updateAutoBadge()}
+function stopAutoLearning(){AUTO.active=false;releaseWakeLock();AUTO.token++;clearReadingFocus();updateAutoBadge()}
 
 let __lastSpokenLang='';
 function stopSpeech(){
@@ -965,7 +965,7 @@ async function releaseWakeLock(){
 function shouldKeepScreenAwake(){
   const speechMode=$('speechMode') ? $('speechMode').value : 'off';
   const learnVisible=$('learn') && !$('learn').classList.contains('hidden');
-  return speechMode!=='off' && learnVisible && (hasStarted || AUTO.active);
+  return speechMode!=='off' && learnVisible && AUTO.active===true;
 }
 
 // If the system/browser releases a standard Wake Lock temporarily,
@@ -988,8 +988,13 @@ setInterval(()=>{
 },5000);
 
 async function autoRead(w,renderVersion=__renderVersion){
-  // Automatic pronunciation is active: prevent screen dim/lock.
-  await acquireWakeLock();
+  // Keep the screen awake ONLY during selected/repeat autoplay.
+  // Normal learning/quiz/review must follow the phone's screen-timeout setting.
+  if(AUTO.active===true){
+    await acquireWakeLock();
+  }else{
+    await releaseWakeLock();
+  }
 
   if(!w)return false;
   const expectedKey=cardKey(w);
@@ -1107,7 +1112,7 @@ async function autoReadAndAdvance(w,renderVersion=__renderVersion){
   if(i<deck.length-1){i++;render(true);return}
   if(AUTO.pass<AUTO.repeats){AUTO.pass++;i=0;render(true);return}
 
-  stopSpeech();AUTO.active=false;clearExactReadingFocus();updateAutoBadge();$('bar').style.width='100%';
+  stopSpeech();AUTO.active=false;releaseWakeLock();clearExactReadingFocus();updateAutoBadge();$('bar').style.width='100%';
   $('finishSummary').innerHTML=`선택한 ${AUTO.selectedDays.length}개 Day · ${deck.length}개 카드를 ${AUTO.repeats}회 자동 학습했습니다.`;
   $('finishOverlay').classList.remove('hidden');
 }
@@ -1378,13 +1383,13 @@ $('speechMode').onchange=async()=>{
   clearReadingFocus();
   save();
   const m=$('speechMode').value;
-  if(m==='off')await releaseWakeLock(); else await acquireWakeLock();
+  if(m==='off' || AUTO.active!==true)await releaseWakeLock(); else await acquireWakeLock();
   $('autoStatus').textContent=
     m==='off'?'자동 읽기가 꺼져 있습니다.':
     m==='full'?'전체 읽기: 단어, 뜻, 예문, 해석, 패러프레이즈, 추가 표현까지 읽습니다.':
     '새 카드에서 단어, 예문, 패러프레이즈를 차례로 읽어 줍니다.';
 };
-$('startLearning').onclick=()=>{enableKeepAwakeFromGesture();initTTS();hasStarted=true;$('startOverlay').classList.add('hidden');$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)};$('restartLearning').onclick=()=>{stopSpeech();$('finishOverlay').classList.add('hidden');if(AUTO.selectedDays&&AUTO.selectedDays.length){document.querySelectorAll('.daySelectCheck').forEach(x=>x.checked=AUTO.selectedDays.includes(Number(x.dataset.checkDay)));startSelectedAutoLearning()}else{$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)}};
+$('startLearning').onclick=()=>{releaseWakeLock();initTTS();hasStarted=true;$('startOverlay').classList.add('hidden');$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)};$('restartLearning').onclick=()=>{stopSpeech();$('finishOverlay').classList.add('hidden');if(AUTO.selectedDays&&AUTO.selectedDays.length){document.querySelectorAll('.daySelectCheck').forEach(x=>x.checked=AUTO.selectedDays.includes(Number(x.dataset.checkDay)));startSelectedAutoLearning()}else{$('bottom').classList.remove('hidden');buildDeck($('orderMode').value)}};
 let quizCurrent=null,quizAnswered=false;
 let quizDeck=[], quizIndex=0, quizSessionDone=false, quizSessionWrong=[];
 
@@ -1767,7 +1772,7 @@ function goHome(){
 $('homeBtn').onclick=goHome;
 const savedAutoRepeat=localStorage.getItem('selectedStudyRepeat');if(savedAutoRepeat&&document.getElementById('autoRepeat'))$('autoRepeat').value=savedAutoRepeat;
 $('selectedStartBtn').onclick=startSelectedAutoLearning;
-$('todayStartBtn').onclick=()=>{enableKeepAwakeFromGesture();let due=dueWordsAll();if(due.length){openDay(due[0].newDay,'forget');return}let next=Array.from({length:30},(_,i)=>i+1).find(d=>dayProgress(d).learned<dayProgress(d).total)||1;openDay(next,'learn')};
+$('todayStartBtn').onclick=()=>{releaseWakeLock();let due=dueWordsAll();if(due.length){openDay(due[0].newDay,'forget');return}let next=Array.from({length:30},(_,i)=>i+1).find(d=>dayProgress(d).learned<dayProgress(d).total)||1;openDay(next,'learn')};
 
 let sx=0;$('card').addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});$('card').addEventListener('touchend',e=>{let dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>70)cls(dx>0?'k':'l')},{passive:true});{const m=$('speechMode').value;$('autoStatus').textContent=m==='off'?'자동 읽기가 꺼져 있습니다.':m==='full'?'전체 읽기: 학습 단어만 영어와 한글 뜻을 읽고, 그 외 모든 항목은 영어만 읽습니다.':'학습 단어만 영어와 한글 뜻을 읽고, 예문과 패러프레이즈는 영어만 읽습니다.';}buildDeck('book');updateHomeDashboard();$('dayAppPage').classList.add('hidden');$('homePage').classList.remove('hidden');
 
@@ -1777,5 +1782,20 @@ window.addEventListener('pagehide',()=>{ releaseWakeLock(); });
 if('serviceWorker' in navigator && location.protocol==='https:'){
   window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 }
+
+
+// Wake Lock policy:
+// - selected/repeat autoplay: keep screen awake
+// - ordinary Learn / Quiz / Forget / Score: respect phone timeout
+document.addEventListener('click',(ev)=>{
+  const tab=ev.target.closest && ev.target.closest('.tab');
+  if(!tab)return;
+  const view=tab.dataset ? tab.dataset.v : '';
+  if(view && view!=='learn'){
+    releaseWakeLock();
+  }else if(view==='learn' && AUTO.active!==true){
+    releaseWakeLock();
+  }
+});
 
 </script></body></html>
