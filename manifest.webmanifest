@@ -1,9 +1,0 @@
-{
-  "name": "OPIC AL Vocabulary",
-  "short_name": "OPIC Vocab",
-  "start_url": "./index.html",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2563eb",
-  "id": "./?v=5"
-}
